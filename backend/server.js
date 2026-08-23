@@ -120,6 +120,104 @@ app.get("/api/blocks/:blockId/villages", async (req, res) => {
   }
 });
 
+app.get("/api/villages/:villageId/water-overview", async (req, res) => {
+  try {
+    const { villageId } = req.params;
+
+    const village = await prisma.village.findUnique({
+      where: {
+        id: villageId,
+      },
+      include: {
+        block: {
+          include: {
+            district: {
+              include: {
+                state: true,
+              },
+            },
+          },
+        },
+      },
+    });
+
+    if (!village) {
+      return res.status(404).json({
+        status: "error",
+        message: "Village not found",
+      });
+    }
+
+    const [
+      totalWaterSources,
+      activeWaterSources,
+      totalWaterConnections,
+      activeWaterConnections,
+      nonFunctionalConnections,
+      latestWaterQualityTest,
+    ] = await Promise.all([
+      prisma.waterSource.count({
+        where: {
+          villageId,
+        },
+      }),
+      prisma.waterSource.count({
+        where: {
+          villageId,
+          status: "ACTIVE",
+        },
+      }),
+      prisma.waterConnection.count({
+        where: {
+          villageId,
+        },
+      }),
+      prisma.waterConnection.count({
+        where: {
+          villageId,
+          status: "ACTIVE",
+        },
+      }),
+      prisma.waterConnection.count({
+        where: {
+          villageId,
+          status: "NON_FUNCTIONAL",
+        },
+      }),
+      prisma.waterQualityTest.findFirst({
+        where: {
+          waterSource: {
+            villageId,
+          },
+        },
+        include: {
+          waterSource: true,
+        },
+        orderBy: {
+          testedAt: "desc",
+        },
+      }),
+    ]);
+
+    res.json({
+      village,
+      totalWaterSources,
+      activeWaterSources,
+      totalHouseholdWaterConnections: totalWaterConnections,
+      activeHouseholdWaterConnections: activeWaterConnections,
+      nonFunctionalConnections,
+      latestWaterQualityTest,
+    });
+  } catch (error) {
+    console.error("Failed to fetch village water overview:", error);
+
+    res.status(500).json({
+      status: "error",
+      message: "Failed to fetch village water overview",
+    });
+  }
+});
+
 app.get("/api/villages/:villageId", async (req, res) => {
   try {
     const { villageId } = req.params;
