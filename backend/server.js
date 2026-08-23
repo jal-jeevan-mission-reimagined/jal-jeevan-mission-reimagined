@@ -120,6 +120,66 @@ app.get("/api/blocks/:blockId/villages", async (req, res) => {
   }
 });
 
+app.get("/api/villages/:villageId/water-quality", async (req, res) => {
+  try {
+    const { villageId } = req.params;
+
+    const village = await prisma.village.findUnique({
+      where: {
+        id: villageId,
+      },
+      select: {
+        id: true,
+        name: true,
+      },
+    });
+
+    if (!village) {
+      return res.status(404).json({
+        status: "error",
+        message: "Village not found",
+      });
+    }
+
+    const latestWaterQualityTests = await prisma.waterQualityTest.findMany({
+      where: {
+        waterSource: {
+          villageId,
+        },
+      },
+      select: {
+        testedAt: true,
+        ph: true,
+        turbidity: true,
+        isSafe: true,
+        waterSource: {
+          select: {
+            id: true,
+            name: true,
+            type: true,
+          },
+        },
+      },
+      distinct: ["waterSourceId"],
+      orderBy: {
+        testedAt: "desc",
+      },
+    });
+
+    res.json({
+      village,
+      waterQualityTests: latestWaterQualityTests,
+    });
+  } catch (error) {
+    console.error("Failed to fetch village water quality:", error);
+
+    res.status(500).json({
+      status: "error",
+      message: "Failed to fetch village water quality",
+    });
+  }
+});
+
 app.get("/api/villages/:villageId/water-overview", async (req, res) => {
   try {
     const { villageId } = req.params;
