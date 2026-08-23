@@ -18,12 +18,143 @@ app.use(express.json());
 
 const PORT = process.env.PORT || 5000;
 
+// --------------------------------------------------
+// HEALTH
+// --------------------------------------------------
+
 app.get("/api/health", (req, res) => {
   res.json({
     status: "ok",
     message: "Jal Jeevan Mission backend is running",
   });
 });
+
+// --------------------------------------------------
+// CREATE COMPLAINT
+// --------------------------------------------------
+
+app.post("/api/complaints", async (req, res) => {
+  try {
+    const {
+      villageId,
+      category,
+      description,
+      latitude,
+      longitude,
+      priority,
+    } = req.body;
+
+    const validCategories = [
+      "NO_WATER",
+      "LOW_PRESSURE",
+      "WATER_QUALITY",
+      "PIPELINE_DAMAGE",
+      "INFRASTRUCTURE",
+      "OTHER",
+    ];
+
+    const validPriorities = ["LOW", "MEDIUM", "HIGH", "CRITICAL"];
+
+    if (!villageId || !category || !description) {
+      return res.status(400).json({
+        status: "error",
+        message: "villageId, category, and description are required",
+      });
+    }
+
+    if (!validCategories.includes(category)) {
+      return res.status(400).json({
+        status: "error",
+        message: "Invalid complaint category",
+      });
+    }
+
+    if (priority && !validPriorities.includes(priority)) {
+      return res.status(400).json({
+        status: "error",
+        message: "Invalid complaint priority",
+      });
+    }
+
+    const village = await prisma.village.findUnique({
+      where: {
+        id: villageId,
+      },
+      select: {
+        id: true,
+      },
+    });
+
+    if (!village) {
+      return res.status(404).json({
+        status: "error",
+        message: "Village not found",
+      });
+    }
+
+    const complaintNumber = `JAL-${Date.now().toString().slice(-6)}${Math.floor(
+      Math.random() * 10
+    )}`;
+
+    const complaint = await prisma.complaint.create({
+      data: {
+        complaintNumber,
+        villageId,
+        category,
+        description,
+        latitude:
+          latitude !== undefined && latitude !== null
+            ? Number(latitude)
+            : null,
+        longitude:
+          longitude !== undefined && longitude !== null
+            ? Number(longitude)
+            : null,
+        priority: priority || "MEDIUM",
+        status: "SUBMITTED",
+      },
+    });
+
+    return res.status(201).json(complaint);
+  } catch (error) {
+    console.error("Failed to create complaint:", error);
+
+    return res.status(500).json({
+      status: "error",
+      message: "Failed to create complaint",
+    });
+  }
+});
+
+// --------------------------------------------------
+// STATES
+// --------------------------------------------------
+
+app.get("/api/states", async (req, res) => {
+  try {
+    const states = await prisma.state.findMany({
+      include: {
+        districts: true,
+      },
+      orderBy: {
+        name: "asc",
+      },
+    });
+
+    res.json(states);
+  } catch (error) {
+    console.error("Failed to fetch states:", error);
+
+    res.status(500).json({
+      status: "error",
+      message: "Failed to fetch states",
+    });
+  }
+});
+
+// --------------------------------------------------
+// DISTRICTS
+// --------------------------------------------------
 
 app.get("/api/districts", async (req, res) => {
   try {
@@ -47,27 +178,9 @@ app.get("/api/districts", async (req, res) => {
   }
 });
 
-app.get("/api/states", async (req, res) => {
-  try {
-    const states = await prisma.state.findMany({
-      include: {
-        districts: true,
-      },
-      orderBy: {
-        name: "asc",
-      },
-    });
-
-    res.json(states);
-  } catch (error) {
-    console.error("Failed to fetch states:", error);
-
-    res.status(500).json({
-      status: "error",
-      message: "Failed to fetch states",
-    });
-  }
-});
+// --------------------------------------------------
+// BLOCKS BY DISTRICT
+// --------------------------------------------------
 
 app.get("/api/districts/:districtId/blocks", async (req, res) => {
   try {
@@ -96,6 +209,10 @@ app.get("/api/districts/:districtId/blocks", async (req, res) => {
   }
 });
 
+// --------------------------------------------------
+// VILLAGES BY BLOCK
+// --------------------------------------------------
+
 app.get("/api/blocks/:blockId/villages", async (req, res) => {
   try {
     const { blockId } = req.params;
@@ -120,163 +237,9 @@ app.get("/api/blocks/:blockId/villages", async (req, res) => {
   }
 });
 
-app.get("/api/villages/:villageId/water-quality", async (req, res) => {
-  try {
-    const { villageId } = req.params;
-
-    const village = await prisma.village.findUnique({
-      where: {
-        id: villageId,
-      },
-      select: {
-        id: true,
-        name: true,
-      },
-    });
-
-    if (!village) {
-      return res.status(404).json({
-        status: "error",
-        message: "Village not found",
-      });
-    }
-
-    const latestWaterQualityTests = await prisma.waterQualityTest.findMany({
-      where: {
-        waterSource: {
-          villageId,
-        },
-      },
-      select: {
-        testedAt: true,
-        ph: true,
-        turbidity: true,
-        isSafe: true,
-        waterSource: {
-          select: {
-            id: true,
-            name: true,
-            type: true,
-          },
-        },
-      },
-      distinct: ["waterSourceId"],
-      orderBy: {
-        testedAt: "desc",
-      },
-    });
-
-    res.json({
-      village,
-      waterQualityTests: latestWaterQualityTests,
-    });
-  } catch (error) {
-    console.error("Failed to fetch village water quality:", error);
-
-    res.status(500).json({
-      status: "error",
-      message: "Failed to fetch village water quality",
-    });
-  }
-});
-
-app.get("/api/villages/:villageId/water-overview", async (req, res) => {
-  try {
-    const { villageId } = req.params;
-
-    const village = await prisma.village.findUnique({
-      where: {
-        id: villageId,
-      },
-      include: {
-        block: {
-          include: {
-            district: {
-              include: {
-                state: true,
-              },
-            },
-          },
-        },
-      },
-    });
-
-    if (!village) {
-      return res.status(404).json({
-        status: "error",
-        message: "Village not found",
-      });
-    }
-
-    const [
-      totalWaterSources,
-      activeWaterSources,
-      totalWaterConnections,
-      activeWaterConnections,
-      nonFunctionalConnections,
-      latestWaterQualityTest,
-    ] = await Promise.all([
-      prisma.waterSource.count({
-        where: {
-          villageId,
-        },
-      }),
-      prisma.waterSource.count({
-        where: {
-          villageId,
-          status: "ACTIVE",
-        },
-      }),
-      prisma.waterConnection.count({
-        where: {
-          villageId,
-        },
-      }),
-      prisma.waterConnection.count({
-        where: {
-          villageId,
-          status: "ACTIVE",
-        },
-      }),
-      prisma.waterConnection.count({
-        where: {
-          villageId,
-          status: "NON_FUNCTIONAL",
-        },
-      }),
-      prisma.waterQualityTest.findFirst({
-        where: {
-          waterSource: {
-            villageId,
-          },
-        },
-        include: {
-          waterSource: true,
-        },
-        orderBy: {
-          testedAt: "desc",
-        },
-      }),
-    ]);
-
-    res.json({
-      village,
-      totalWaterSources,
-      activeWaterSources,
-      totalHouseholdWaterConnections: totalWaterConnections,
-      activeHouseholdWaterConnections: activeWaterConnections,
-      nonFunctionalConnections,
-      latestWaterQualityTest,
-    });
-  } catch (error) {
-    console.error("Failed to fetch village water overview:", error);
-
-    res.status(500).json({
-      status: "error",
-      message: "Failed to fetch village water overview",
-    });
-  }
-});
+// --------------------------------------------------
+// VILLAGE DETAIL
+// --------------------------------------------------
 
 app.get("/api/villages/:villageId", async (req, res) => {
   try {
@@ -318,6 +281,188 @@ app.get("/api/villages/:villageId", async (req, res) => {
     });
   }
 });
+
+// --------------------------------------------------
+// VILLAGE WATER QUALITY
+// --------------------------------------------------
+
+app.get("/api/villages/:villageId/water-quality", async (req, res) => {
+  try {
+    const { villageId } = req.params;
+
+    const village = await prisma.village.findUnique({
+      where: {
+        id: villageId,
+      },
+      select: {
+        id: true,
+        name: true,
+      },
+    });
+
+    if (!village) {
+      return res.status(404).json({
+        status: "error",
+        message: "Village not found",
+      });
+    }
+
+    const latestWaterQualityTests =
+      await prisma.waterQualityTest.findMany({
+        where: {
+          waterSource: {
+            villageId,
+          },
+        },
+        select: {
+          testedAt: true,
+          ph: true,
+          turbidity: true,
+          isSafe: true,
+          waterSource: {
+            select: {
+              id: true,
+              name: true,
+              type: true,
+            },
+          },
+        },
+        distinct: ["waterSourceId"],
+        orderBy: {
+          testedAt: "desc",
+        },
+      });
+
+    res.json({
+      village,
+      waterQualityTests: latestWaterQualityTests,
+    });
+  } catch (error) {
+    console.error(
+      "Failed to fetch village water quality:",
+      error
+    );
+
+    res.status(500).json({
+      status: "error",
+      message: "Failed to fetch village water quality",
+    });
+  }
+});
+
+// --------------------------------------------------
+// VILLAGE WATER OVERVIEW
+// --------------------------------------------------
+
+app.get("/api/villages/:villageId/water-overview", async (req, res) => {
+  try {
+    const { villageId } = req.params;
+
+    const village = await prisma.village.findUnique({
+      where: {
+        id: villageId,
+      },
+      include: {
+        block: {
+          include: {
+            district: {
+              include: {
+                state: true,
+              },
+            },
+          },
+        },
+      },
+    });
+
+    if (!village) {
+      return res.status(404).json({
+        status: "error",
+        message: "Village not found",
+      });
+    }
+
+    const [
+      totalWaterSources,
+      activeWaterSources,
+      totalHouseholdWaterConnections,
+      activeHouseholdWaterConnections,
+      nonFunctionalConnections,
+      latestWaterQualityTest,
+    ] = await Promise.all([
+      prisma.waterSource.count({
+        where: {
+          villageId,
+        },
+      }),
+
+      prisma.waterSource.count({
+        where: {
+          villageId,
+          status: "ACTIVE",
+        },
+      }),
+
+      prisma.waterConnection.count({
+        where: {
+          villageId,
+        },
+      }),
+
+      prisma.waterConnection.count({
+        where: {
+          villageId,
+          status: "ACTIVE",
+        },
+      }),
+
+      prisma.waterConnection.count({
+        where: {
+          villageId,
+          status: "NON_FUNCTIONAL",
+        },
+      }),
+
+      prisma.waterQualityTest.findFirst({
+        where: {
+          waterSource: {
+            villageId,
+          },
+        },
+        include: {
+          waterSource: true,
+        },
+        orderBy: {
+          testedAt: "desc",
+        },
+      }),
+    ]);
+
+    res.json({
+      village,
+      totalWaterSources,
+      activeWaterSources,
+      totalHouseholdWaterConnections,
+      activeHouseholdWaterConnections,
+      nonFunctionalConnections,
+      latestWaterQualityTest,
+    });
+  } catch (error) {
+    console.error(
+      "Failed to fetch village water overview:",
+      error
+    );
+
+    res.status(500).json({
+      status: "error",
+      message: "Failed to fetch village water overview",
+    });
+  }
+});
+
+// --------------------------------------------------
+// START SERVER
+// --------------------------------------------------
 
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
