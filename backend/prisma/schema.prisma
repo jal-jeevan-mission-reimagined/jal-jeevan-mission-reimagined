@@ -1,8 +1,3 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
-// Get a free hosted Postgres database in seconds: `npx create-db`
-
 generator client {
   provider = "prisma-client"
   output   = "../generated/prisma"
@@ -10,4 +5,57 @@ generator client {
 
 datasource db {
   provider = "postgresql"
+}
+
+model State {
+  id        String     @id @default(uuid())
+  name      String
+  code      String     @unique
+  districts District[]
+
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+}
+
+model District {
+  id        String   @id @default(uuid())
+  name      String
+
+  stateId   String
+  state     State    @relation(fields: [stateId], references: [id], onDelete: Cascade)
+
+  blocks    Block[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([stateId])
+}
+
+model Block {
+  id         String     @id @default(uuid())
+  name       String
+
+  districtId String
+  district   District   @relation(fields: [districtId], references: [id], onDelete: Cascade)
+
+  villages   Village[]
+
+  createdAt  DateTime   @default(now())
+  updatedAt  DateTime   @updatedAt
+
+  @@index([districtId])
+}
+
+model Village {
+  id        String   @id @default(uuid())
+  name      String
+
+  blockId   String
+  block     Block    @relation(fields: [blockId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([blockId])
 }
