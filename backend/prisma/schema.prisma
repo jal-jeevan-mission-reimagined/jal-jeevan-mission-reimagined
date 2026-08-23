@@ -1,6 +1,5 @@
 generator client {
-  provider = "prisma-client"
-  output   = "../generated/prisma"
+  provider = "prisma-client-js"
 }
 
 datasource db {
@@ -11,57 +10,88 @@ model State {
   id        String     @id @default(uuid())
   name      String
   code      String     @unique
-  districts District[]
-
   createdAt DateTime   @default(now())
   updatedAt DateTime   @updatedAt
+  districts District[]
 }
 
 model District {
   id        String   @id @default(uuid())
   name      String
-
   stateId   String
-  state     State    @relation(fields: [stateId], references: [id], onDelete: Cascade)
-
-  blocks    Block[]
-
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+  blocks    Block[]
+  state     State    @relation(fields: [stateId], references: [id], onDelete: Cascade)
 
   @@index([stateId])
 }
 
 model Block {
-  id         String     @id @default(uuid())
+  id         String    @id @default(uuid())
   name       String
-
   districtId String
-  district   District   @relation(fields: [districtId], references: [id], onDelete: Cascade)
-
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+  district   District  @relation(fields: [districtId], references: [id], onDelete: Cascade)
   villages   Village[]
-
-  createdAt  DateTime   @default(now())
-  updatedAt  DateTime   @updatedAt
 
   @@index([districtId])
 }
 
 model Village {
-  id        String   @id @default(uuid())
-  name      String
-
-  blockId   String
-  block     Block    @relation(fields: [blockId], references: [id], onDelete: Cascade)
-
-  waterSources     WaterSource[]
+  id               String            @id @default(uuid())
+  name             String
+  blockId          String
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+  block            Block             @relation(fields: [blockId], references: [id], onDelete: Cascade)
   waterConnections WaterConnection[]
-
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  waterSources     WaterSource[]
 
   @@index([blockId])
 }
+
+model WaterSource {
+  id           String             @id @default(uuid())
+  name         String
+  type         WaterSourceType
+  status       ServiceStatus      @default(ACTIVE)
+  villageId    String
+  createdAt    DateTime           @default(now())
+  updatedAt    DateTime           @updatedAt
+  qualityTests WaterQualityTest[]
+  village      Village            @relation(fields: [villageId], references: [id], onDelete: Cascade)
+
+  @@index([villageId])
+}
+
+model WaterConnection {
+  id           String        @id @default(uuid())
+  connectionNo String        @unique
+  status       ServiceStatus @default(ACTIVE)
+  connectedAt  DateTime?
+  villageId    String
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+  village      Village       @relation(fields: [villageId], references: [id], onDelete: Cascade)
+
+  @@index([villageId])
+}
+
+model WaterQualityTest {
+  id            String      @id @default(uuid())
+  testedAt      DateTime    @default(now())
+  ph            Float?
+  turbidity     Float?
+  isSafe        Boolean
+  waterSourceId String
+  createdAt     DateTime    @default(now())
+  waterSource   WaterSource @relation(fields: [waterSourceId], references: [id], onDelete: Cascade)
+
+  @@index([waterSourceId])
+}
+
 enum ServiceStatus {
   ACTIVE
   INACTIVE
@@ -74,51 +104,4 @@ enum WaterSourceType {
   SURFACE_WATER
   TAP
   OTHER
-}
-
-model WaterSource {
-  id          String           @id @default(uuid())
-  name        String
-  type        WaterSourceType
-  status      ServiceStatus    @default(ACTIVE)
-
-  villageId   String
-  village     Village          @relation(fields: [villageId], references: [id], onDelete: Cascade)
-
-  qualityTests WaterQualityTest[]
-
-  createdAt   DateTime         @default(now())
-  updatedAt   DateTime         @updatedAt
-
-  @@index([villageId])
-}
-
-model WaterConnection {
-  id            String        @id @default(uuid())
-  connectionNo  String        @unique
-  status        ServiceStatus @default(ACTIVE)
-  connectedAt   DateTime?
-
-  villageId     String
-  village       Village       @relation(fields: [villageId], references: [id], onDelete: Cascade)
-
-  createdAt     DateTime      @default(now())
-  updatedAt     DateTime      @updatedAt
-
-  @@index([villageId])
-}
-
-model WaterQualityTest {
-  id            String      @id @default(uuid())
-  testedAt      DateTime    @default(now())
-  ph            Float?
-  turbidity     Float?
-  isSafe        Boolean
-
-  waterSourceId String
-  waterSource   WaterSource @relation(fields: [waterSourceId], references: [id], onDelete: Cascade)
-
-  createdAt     DateTime    @default(now())
-
-  @@index([waterSourceId])
 }
