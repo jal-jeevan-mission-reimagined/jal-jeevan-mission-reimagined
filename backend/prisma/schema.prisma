@@ -46,10 +46,29 @@ model Village {
   createdAt        DateTime          @default(now())
   updatedAt        DateTime          @updatedAt
   block            Block             @relation(fields: [blockId], references: [id], onDelete: Cascade)
+  complaints       Complaint[]
   waterConnections WaterConnection[]
   waterSources     WaterSource[]
 
   @@index([blockId])
+}
+
+model Complaint {
+  id              String            @id @default(uuid())
+  complaintNumber String            @unique
+  villageId       String
+  category        ComplaintCategory
+  description     String
+  latitude        Float?
+  longitude       Float?
+  priority        ComplaintPriority @default(MEDIUM)
+  status          ComplaintStatus   @default(SUBMITTED)
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+  resolvedAt      DateTime?
+  village         Village           @relation(fields: [villageId], references: [id], onDelete: Cascade)
+
+  @@index([villageId])
 }
 
 model WaterSource {
@@ -104,4 +123,29 @@ enum WaterSourceType {
   SURFACE_WATER
   TAP
   OTHER
+}
+
+enum ComplaintCategory {
+  NO_WATER
+  LOW_PRESSURE
+  WATER_QUALITY
+  PIPELINE_DAMAGE
+  INFRASTRUCTURE
+  OTHER
+}
+
+enum ComplaintPriority {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum ComplaintStatus {
+  SUBMITTED
+  ASSIGNED
+  INVESTIGATION
+  IN_PROGRESS
+  RESOLVED
+  CLOSED
 }
