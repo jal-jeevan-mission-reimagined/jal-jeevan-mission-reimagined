@@ -1,0 +1,151 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model State {
+  id        String     @id @default(uuid())
+  name      String
+  code      String     @unique
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+  districts District[]
+}
+
+model District {
+  id        String   @id @default(uuid())
+  name      String
+  stateId   String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  blocks    Block[]
+  state     State    @relation(fields: [stateId], references: [id], onDelete: Cascade)
+
+  @@index([stateId])
+}
+
+model Block {
+  id         String    @id @default(uuid())
+  name       String
+  districtId String
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+  district   District  @relation(fields: [districtId], references: [id], onDelete: Cascade)
+  villages   Village[]
+
+  @@index([districtId])
+}
+
+model Village {
+  id               String            @id @default(uuid())
+  name             String
+  blockId          String
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+  block            Block             @relation(fields: [blockId], references: [id], onDelete: Cascade)
+  complaints       Complaint[]
+  waterConnections WaterConnection[]
+  waterSources     WaterSource[]
+
+  @@index([blockId])
+}
+
+model Complaint {
+  id              String            @id @default(uuid())
+  complaintNumber String            @unique
+  villageId       String
+  category        ComplaintCategory
+  description     String
+  latitude        Float?
+  longitude       Float?
+  priority        ComplaintPriority @default(MEDIUM)
+  status          ComplaintStatus   @default(SUBMITTED)
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+  resolvedAt      DateTime?
+  village         Village           @relation(fields: [villageId], references: [id], onDelete: Cascade)
+
+  @@index([villageId])
+}
+
+model WaterSource {
+  id           String             @id @default(uuid())
+  name         String
+  type         WaterSourceType
+  status       ServiceStatus      @default(ACTIVE)
+  villageId    String
+  createdAt    DateTime           @default(now())
+  updatedAt    DateTime           @updatedAt
+  qualityTests WaterQualityTest[]
+  village      Village            @relation(fields: [villageId], references: [id], onDelete: Cascade)
+
+  @@index([villageId])
+}
+
+model WaterConnection {
+  id           String        @id @default(uuid())
+  connectionNo String        @unique
+  status       ServiceStatus @default(ACTIVE)
+  connectedAt  DateTime?
+  villageId    String
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+  village      Village       @relation(fields: [villageId], references: [id], onDelete: Cascade)
+
+  @@index([villageId])
+}
+
+model WaterQualityTest {
+  id            String      @id @default(uuid())
+  testedAt      DateTime    @default(now())
+  ph            Float?
+  turbidity     Float?
+  isSafe        Boolean
+  waterSourceId String
+  createdAt     DateTime    @default(now())
+  waterSource   WaterSource @relation(fields: [waterSourceId], references: [id], onDelete: Cascade)
+
+  @@index([waterSourceId])
+}
+
+enum ServiceStatus {
+  ACTIVE
+  INACTIVE
+  NON_FUNCTIONAL
+  UNDER_REPAIR
+}
+
+enum WaterSourceType {
+  GROUNDWATER
+  SURFACE_WATER
+  TAP
+  OTHER
+}
+
+enum ComplaintCategory {
+  NO_WATER
+  LOW_PRESSURE
+  WATER_QUALITY
+  PIPELINE_DAMAGE
+  INFRASTRUCTURE
+  OTHER
+}
+
+enum ComplaintPriority {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum ComplaintStatus {
+  SUBMITTED
+  ASSIGNED
+  INVESTIGATION
+  IN_PROGRESS
+  RESOLVED
+  CLOSED
+}
