@@ -111,6 +111,35 @@ model WaterQualityTest {
   @@index([waterSourceId])
 }
 
+model ImportBatch {
+  id              String         @id @default(uuid())
+  sourceSystem    String
+  sourceDataset   String
+  sourceFileName  String
+  sourceUrl       String?
+  sourceReportDate DateTime?
+  sourcePeriod    String?
+  importedAt      DateTime       @default(now())
+  records         ImportRecord[]
+
+  @@unique([sourceSystem, sourceDataset, sourceFileName, sourceReportDate, sourcePeriod])
+  @@index([sourceDataset, sourceReportDate])
+}
+
+model ImportRecord {
+  id            String      @id @default(uuid())
+  importBatchId String
+  rowNumber     Int
+  externalId    String?
+  rawRecordHash String
+  rawData       Json
+  importBatch   ImportBatch @relation(fields: [importBatchId], references: [id], onDelete: Cascade)
+
+  @@unique([importBatchId, rowNumber])
+  @@unique([importBatchId, rawRecordHash])
+  @@index([externalId])
+}
+
 enum ServiceStatus {
   ACTIVE
   INACTIVE
