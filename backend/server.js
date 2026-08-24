@@ -347,6 +347,211 @@ app.get("/api/blocks/:blockId/villages", async (req, res) => {
 });
 
 // --------------------------------------------------
+// VILLAGE ATTENTION
+// --------------------------------------------------
+
+app.get("/api/villages/:villageId/attention", async (req, res) => {
+  try {
+    const { villageId } = req.params;
+
+    const village = await prisma.village.findUnique({
+      where: {
+        id: villageId,
+      },
+      select: {
+        id: true,
+        name: true,
+      },
+    });
+
+    if (!village) {
+      return res.status(404).json({
+        status: "error",
+        message: "Village not found",
+      });
+    }
+
+    const [connectionStatuses, sourceStatuses, latestQualityTests, complaintPriorities] =
+      await Promise.all([
+        prisma.waterConnection.groupBy({
+          by: ["status"],
+          where: {
+            villageId,
+          },
+          _count: {
+            _all: true,
+          },
+        }),
+        prisma.waterSource.groupBy({
+          by: ["status"],
+          where: {
+            villageId,
+          },
+          _count: {
+            _all: true,
+          },
+        }),
+        prisma.waterQualityTest.findMany({
+          where: {
+            waterSource: {
+              villageId,
+            },
+          },
+          select: {
+            waterSourceId: true,
+            isSafe: true,
+          },
+          distinct: ["waterSourceId"],
+          orderBy: {
+            testedAt: "desc",
+          },
+        }),
+        prisma.complaint.groupBy({
+          by: ["priority"],
+          where: {
+            villageId,
+            status: {
+              notIn: ["RESOLVED", "CLOSED"],
+            },
+          },
+          _count: {
+            _all: true,
+          },
+        }),
+      ]);
+
+    const getStatusCount = (groups, status) => {
+      const group = groups.find((item) => item.status === status);
+
+      return group ? group._count._all : 0;
+    };
+    const getPriorityCount = (priority) => {
+      const group = complaintPriorities.find(
+        (item) => item.priority === priority
+      );
+
+      return group ? group._count._all : 0;
+    };
+    const nonFunctionalConnections = getStatusCount(
+      connectionStatuses,
+      "NON_FUNCTIONAL"
+    );
+    const totalSources = sourceStatuses.reduce(
+      (total, group) => total + group._count._all,
+      0
+    );
+    const activeSources = getStatusCount(sourceStatuses, "ACTIVE");
+    const unsafeLatestTests = latestQualityTests.filter(
+      (test) => !test.isSafe
+    ).length;
+    const lowPriorityComplaints = getPriorityCount("LOW");
+    const mediumPriorityComplaints = getPriorityCount("MEDIUM");
+    const highPriorityComplaints = getPriorityCount("HIGH");
+    const criticalPriorityComplaints = getPriorityCount("CRITICAL");
+    const unresolvedComplaints = complaintPriorities.reduce(
+      (total, group) => total + group._count._all,
+      0
+    );
+
+    const functionalityScore = Math.min(nonFunctionalConnections * 10, 30);
+    const qualityScore = Math.min(unsafeLatestTests * 25, 50);
+    const complaintScore = Math.min(
+      lowPriorityComplaints * 5 +
+        mediumPriorityComplaints * 10 +
+        highPriorityComplaints * 20 +
+        criticalPriorityComplaints * 30,
+      50
+    );
+    const sourceAvailabilityScore = activeSources === 0 ? 70 : 0;
+    const attentionScore = Math.min(
+      functionalityScore + qualityScore + complaintScore + sourceAvailabilityScore,
+      100
+    );
+    const attentionLevel =
+      attentionScore >= 70
+        ? "CRITICAL"
+        : attentionScore >= 45
+          ? "HIGH"
+          : attentionScore >= 20
+            ? "MEDIUM"
+            : "LOW";
+    const reasons = [];
+
+    if (nonFunctionalConnections > 0) {
+      reasons.push(
+        `${nonFunctionalConnections} household water connection(s) are non-functional and need repair.`
+      );
+    }
+
+    if (unsafeLatestTests > 0) {
+      reasons.push(
+        `${unsafeLatestTests} water source(s) have an unsafe latest water-quality test.`
+      );
+    }
+
+    if (unresolvedComplaints > 0) {
+      reasons.push(
+        `${unresolvedComplaints} unresolved complaint(s) require follow-up, weighted by their priority.`
+      );
+    }
+
+    if (activeSources === 0) {
+      reasons.push(
+        "No active water sources are available; this is a critical service risk."
+      );
+    }
+
+    if (reasons.length === 0) {
+      reasons.push("No current administrative attention signals were found.");
+    }
+
+    return res.json({
+      village,
+      attentionLevel,
+      attentionScore,
+      reasons,
+      signals: {
+        functionality: {
+          nonFunctionalConnections,
+          score: functionalityScore,
+          rule: "10 points per non-functional connection, capped at 30.",
+        },
+        waterQuality: {
+          unsafeLatestTests,
+          totalLatestTests: latestQualityTests.length,
+          score: qualityScore,
+          rule: "25 points per unsafe latest test, capped at 50.",
+        },
+        complaints: {
+          unresolvedComplaints,
+          byPriority: {
+            low: lowPriorityComplaints,
+            medium: mediumPriorityComplaints,
+            high: highPriorityComplaints,
+            critical: criticalPriorityComplaints,
+          },
+          score: complaintScore,
+          rule: "LOW: 5, MEDIUM: 10, HIGH: 20, CRITICAL: 30 points per unresolved complaint, capped at 50.",
+        },
+        sourceAvailability: {
+          activeSources,
+          totalSources,
+          score: sourceAvailabilityScore,
+          rule: "70 points when no active water sources are available.",
+        },
+      },
+    });
+  } catch (error) {
+    console.error("Failed to fetch village attention:", error);
+
+    return res.status(500).json({
+      status: "error",
+      message: "Failed to fetch village attention",
+    });
+  }
+});
+
+// --------------------------------------------------
 // VILLAGE WATER HEALTH
 // --------------------------------------------------
 
