@@ -127,6 +127,115 @@ app.post("/api/complaints", async (req, res) => {
 });
 
 // --------------------------------------------------
+// UPDATE COMPLAINT STATUS
+// --------------------------------------------------
+
+app.patch("/api/complaints/:complaintNumber/status", async (req, res) => {
+  try {
+    const { complaintNumber } = req.params;
+    const { status } = req.body || {};
+    const validStatuses = [
+      "ASSIGNED",
+      "INVESTIGATION",
+      "IN_PROGRESS",
+      "RESOLVED",
+      "CLOSED",
+    ];
+
+    if (!validStatuses.includes(status)) {
+      return res.status(400).json({
+        status: "error",
+        message: "Invalid complaint status",
+      });
+    }
+
+    const complaint = await prisma.complaint.findUnique({
+      where: {
+        complaintNumber,
+      },
+    });
+
+    if (!complaint) {
+      return res.status(404).json({
+        status: "error",
+        message: "Complaint not found",
+      });
+    }
+
+    const updateData = {
+      status,
+    };
+
+    if (status === "RESOLVED" || status === "CLOSED") {
+      updateData.resolvedAt = new Date();
+    }
+
+    const updatedComplaint = await prisma.complaint.update({
+      where: {
+        complaintNumber,
+      },
+      data: updateData,
+    });
+
+    return res.json(updatedComplaint);
+  } catch (error) {
+    console.error("Failed to update complaint status:", error);
+
+    return res.status(500).json({
+      status: "error",
+      message: "Failed to update complaint status",
+    });
+  }
+});
+
+// --------------------------------------------------
+// COMPLAINT DETAIL
+// --------------------------------------------------
+
+app.get("/api/complaints/:complaintNumber", async (req, res) => {
+  try {
+    const { complaintNumber } = req.params;
+
+    const complaint = await prisma.complaint.findUnique({
+      where: {
+        complaintNumber,
+      },
+      include: {
+        village: {
+          include: {
+            block: {
+              include: {
+                district: {
+                  include: {
+                    state: true,
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    });
+
+    if (!complaint) {
+      return res.status(404).json({
+        status: "error",
+        message: "Complaint not found",
+      });
+    }
+
+    return res.json(complaint);
+  } catch (error) {
+    console.error("Failed to fetch complaint:", error);
+
+    return res.status(500).json({
+      status: "error",
+      message: "Failed to fetch complaint",
+    });
+  }
+});
+
+// --------------------------------------------------
 // STATES
 // --------------------------------------------------
 
@@ -233,6 +342,248 @@ app.get("/api/blocks/:blockId/villages", async (req, res) => {
     res.status(500).json({
       status: "error",
       message: "Failed to fetch villages",
+    });
+  }
+});
+
+// --------------------------------------------------
+// VILLAGE WATER HEALTH
+// --------------------------------------------------
+
+app.get("/api/villages/:villageId/water-health", async (req, res) => {
+  try {
+    const { villageId } = req.params;
+
+    const village = await prisma.village.findUnique({
+      where: {
+        id: villageId,
+      },
+      select: {
+        id: true,
+        name: true,
+      },
+    });
+
+    if (!village) {
+      return res.status(404).json({
+        status: "error",
+        message: "Village not found",
+      });
+    }
+
+    const [connectionStatuses, sourceStatuses, latestQualityTests, complaintStatuses] =
+      await Promise.all([
+        prisma.waterConnection.groupBy({
+          by: ["status"],
+          where: {
+            villageId,
+          },
+          _count: {
+            _all: true,
+          },
+        }),
+        prisma.waterSource.groupBy({
+          by: ["status"],
+          where: {
+            villageId,
+          },
+          _count: {
+            _all: true,
+          },
+        }),
+        prisma.waterQualityTest.findMany({
+          where: {
+            waterSource: {
+              villageId,
+            },
+          },
+          select: {
+            waterSourceId: true,
+            isSafe: true,
+          },
+          distinct: ["waterSourceId"],
+          orderBy: {
+            testedAt: "desc",
+          },
+        }),
+        prisma.complaint.groupBy({
+          by: ["status"],
+          where: {
+            villageId,
+          },
+          _count: {
+            _all: true,
+          },
+        }),
+      ]);
+
+    const getStatusCount = (groups, status) => {
+      const group = groups.find((item) => item.status === status);
+
+      return group ? group._count._all : 0;
+    };
+    const roundScore = (score) => Math.round(score * 100) / 100;
+    const totalConnections = connectionStatuses.reduce(
+      (total, group) => total + group._count._all,
+      0
+    );
+    const activeConnections = getStatusCount(connectionStatuses, "ACTIVE");
+    const nonFunctionalConnections = getStatusCount(
+      connectionStatuses,
+      "NON_FUNCTIONAL"
+    );
+    const totalSources = sourceStatuses.reduce(
+      (total, group) => total + group._count._all,
+      0
+    );
+    const activeSources = getStatusCount(sourceStatuses, "ACTIVE");
+    const safeQualityTests = latestQualityTests.filter(
+      (test) => test.isSafe
+    ).length;
+    const submittedComplaints = getStatusCount(complaintStatuses, "SUBMITTED");
+    const assignedComplaints = getStatusCount(complaintStatuses, "ASSIGNED");
+    const investigationComplaints = getStatusCount(
+      complaintStatuses,
+      "INVESTIGATION"
+    );
+    const inProgressComplaints = getStatusCount(
+      complaintStatuses,
+      "IN_PROGRESS"
+    );
+
+    const coverageScore =
+      totalConnections > 0 ? (activeConnections / totalConnections) * 100 : 0;
+    const functionalityDenominator = activeConnections + nonFunctionalConnections;
+    const functionalityScore =
+      functionalityDenominator > 0
+        ? (activeConnections / functionalityDenominator) * 100
+        : 0;
+    const qualityScore =
+      latestQualityTests.length > 0
+        ? (safeQualityTests / latestQualityTests.length) * 100
+        : null;
+    const reliabilityScore =
+      totalSources > 0 ? (activeSources / totalSources) * 100 : null;
+    const complaintPenalty =
+      submittedComplaints * 5 +
+      assignedComplaints * 5 +
+      investigationComplaints * 10 +
+      inProgressComplaints * 10;
+    const complaintScore = Math.max(0, 100 - complaintPenalty);
+    const weightedComponents = [
+      { name: "coverage", score: coverageScore, weight: 0.3 },
+      { name: "functionality", score: functionalityScore, weight: 0.25 },
+      { name: "quality", score: qualityScore, weight: 0.25 },
+      { name: "reliability", score: reliabilityScore, weight: 0.1 },
+      { name: "complaints", score: complaintScore, weight: 0.1 },
+    ].filter((component) => component.score !== null);
+    const totalWeight = weightedComponents.reduce(
+      (total, component) => total + component.weight,
+      0
+    );
+    const overallScore = roundScore(
+      weightedComponents.reduce(
+        (total, component) => total + component.score * component.weight,
+        0
+      ) / totalWeight
+    );
+    const healthStatus =
+      overallScore >= 80
+        ? "GOOD"
+        : overallScore >= 60
+          ? "ATTENTION"
+          : "HIGH_RISK";
+    const reasons = [];
+
+    if (totalConnections === 0) {
+      reasons.push(
+        "No household water connections are recorded, so coverage and functionality scores are 0."
+      );
+    } else {
+      reasons.push(
+        `${activeConnections} of ${totalConnections} household water connections are active.`
+      );
+    }
+
+    if (qualityScore === null) {
+      reasons.push(
+        "No water-quality tests are available, so quality is excluded from the overall score."
+      );
+    } else {
+      reasons.push(
+        `${safeQualityTests} of ${latestQualityTests.length} latest water-quality tests are safe.`
+      );
+    }
+
+    if (reliabilityScore === null) {
+      reasons.push(
+        "No water sources are recorded, so reliability is excluded from the overall score."
+      );
+    } else {
+      reasons.push(
+        `${activeSources} of ${totalSources} water sources are active for reliability.`
+      );
+    }
+
+    if (complaintPenalty > 0) {
+      reasons.push(
+        `Unresolved complaints reduced the complaint score by ${complaintPenalty} points.`
+      );
+    } else {
+      reasons.push("There are no unresolved complaints affecting the score.");
+    }
+
+    return res.json({
+      village,
+      overallScore,
+      status: healthStatus,
+      components: {
+        coverage: {
+          score: roundScore(coverageScore),
+          weight: 30,
+          activeConnections,
+          totalConnections,
+        },
+        functionality: {
+          score: roundScore(functionalityScore),
+          weight: 25,
+          activeConnections,
+          nonFunctionalConnections,
+        },
+        quality: {
+          score: qualityScore === null ? null : roundScore(qualityScore),
+          weight: 25,
+          includedInOverall: qualityScore !== null,
+          safeLatestTests: safeQualityTests,
+          totalLatestTests: latestQualityTests.length,
+        },
+        reliability: {
+          score: reliabilityScore === null ? null : roundScore(reliabilityScore),
+          weight: 10,
+          includedInOverall: reliabilityScore !== null,
+          activeSources,
+          totalSources,
+        },
+        complaints: {
+          score: complaintScore,
+          weight: 10,
+          penalty: complaintPenalty,
+          unresolved: {
+            submitted: submittedComplaints,
+            assigned: assignedComplaints,
+            investigation: investigationComplaints,
+            inProgress: inProgressComplaints,
+          },
+        },
+      },
+      reasons,
+    });
+  } catch (error) {
+    console.error("Failed to fetch village water health:", error);
+
+    return res.status(500).json({
+      status: "error",
+      message: "Failed to fetch village water health",
     });
   }
 });
